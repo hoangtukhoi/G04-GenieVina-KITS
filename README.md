@@ -6,6 +6,7 @@ Thiết kế dữ liệu cho REST API chỉ số vận hành Connext GNOM.
 - [Schema PostgreSQL](database/schema.sql)
 - [Script sinh dữ liệu giả](scripts/generate_seed.py)
 - [Phần A: hợp đồng API khách hàng và bàn giao](docs/customer-api.md)
+- [Phần D: xác thực, phân quyền, phản hồi chung, xử lý ngoại lệ](docs/auth.md)
 
 ## Chạy API khách hàng (phần A)
 
@@ -27,13 +28,21 @@ uvicorn app.main:app --reload --env-file .env
 
 Swagger: http://127.0.0.1:8000/docs. OpenAPI JSON: http://127.0.0.1:8000/openapi.json.
 
-Trong khi thành viên D chưa tích hợp API đăng nhập, tạo JWT thử nghiệm bằng CLI local (không phải endpoint phát token):
+Đăng nhập để lấy JWT (tài khoản mẫu ở mục *Chạy dữ liệu mẫu*), rồi copy `data.accessToken` vào nút **Authorize** của Swagger:
 
 ```sh
-python scripts/create_demo_token.py --member-id 1
+curl -X POST http://127.0.0.1:8000/api/auth/login   -H 'Content-Type: application/json'   -d '{"email":"admin@example.invalid","password":"DemoOnly!2026"}'
+
+curl -X POST http://127.0.0.1:8000/api/auth/logout -H 'Authorization: Bearer YOUR_TOKEN'
 ```
 
-ID mẫu: `1` ADMIN, `2` OPERATOR, `3` VIEWER. Copy token vào nút **Authorize** của Swagger. Token thử nghiệm hết hạn sau 30 phút. API xác minh chữ ký HS256, `sub`, `exp`, kiểm tra thành viên tồn tại và đọc quyền hiện tại từ database. Đăng nhập/logout và danh sách token đã thu hồi thuộc phần D, chưa triển khai trong phần A; điểm tích hợp là `app/auth.py:get_principal`.
+Token hết hạn sau 60 phút (`JWT_EXPIRES_MINUTES`). API xác minh chữ ký HS256, `sub`, `exp`, `jti`, từ chối token đã logout và đọc quyền hiện tại từ database. Chi tiết luồng token, ma trận phân quyền và mã lỗi: [docs/auth.md](docs/auth.md). Khi cần token offline mà không gọi login, dùng `python scripts/create_demo_token.py --member-id 1` (`1` ADMIN, `2` OPERATOR, `3` VIEWER).
+
+Database đã tạo từ `schema.sql` cũ (trước khi có logout) cần chạy thêm migration:
+
+```sh
+psql -d genie_vina -v ON_ERROR_STOP=1 -f database/migrations/001_revoked_tokens.sql
+```
 
 Ví dụ gọi API sau khi thay `YOUR_TOKEN` bằng JWT:
 
@@ -69,10 +78,14 @@ Cấu trúc backend:
 
 ```text
 app/
-  main.py        # FastAPI, định dạng lỗi chung, OpenAPI
+  main.py        # FastAPI, đăng ký router, OpenAPI/Swagger
   config.py      # Biến môi trường bắt buộc
   db.py          # Kết nối và transaction theo request
-  auth.py        # Xác minh JWT, phân quyền; tích hợp phần D tại đây
+  errors.py      # Phản hồi chung {status, message, data}, AppError, xử lý ngoại lệ
+  security.py    # Hash/verify mật khẩu PBKDF2, phát hành JWT
+  auth.py        # Xác minh JWT, kiểm tra token đã thu hồi, require_roles
+  permissions.py # Ma trận phân quyền ADMIN / OPERATOR / VIEWER
+  auth_api.py    # POST /api/auth/login, POST /api/auth/logout, GET /api/auth/me
   models.py      # Request/response, kiểm tra đầu vào
   customers.py   # 5 endpoint CRUD khách hàng
 ```

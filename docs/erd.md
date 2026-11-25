@@ -8,6 +8,7 @@ erDiagram
     customers ||--o{ ai_results : generates
     orders ||--o{ order_status_histories : has
     members ||--o{ order_status_histories : changes
+    members ||--o{ revoked_tokens : "logs out"
 
     customers {
         bigint id PK
@@ -50,7 +51,15 @@ erDiagram
         varchar role
         timestamptz created_at
     }
+    revoked_tokens {
+        varchar jti PK
+        bigint member_id FK
+        timestamptz revoked_at
+        timestamptz expires_at
+    }
 ```
+
+`revoked_tokens` là bảng kỹ thuật do phần D bổ sung để thu hồi JWT khi logout (xem [auth.md](auth.md)). Bảng này không tham gia tính chỉ số.
 
 ## Quyết định thiết kế
 

@@ -14,10 +14,29 @@ async def lifespan(app: FastAPI):
     yield
 
 
+DESCRIPTION = '''REST API quản lý dữ liệu và chỉ số vận hành Connext GNOM.
+
+**Cách thử trên Swagger**
+1. `POST /api/auth/login` với tài khoản mẫu (`admin@example.invalid` / `operator@example.invalid` /
+   `viewer@example.invalid`, mật khẩu `DemoOnly!2026`).
+2. Copy `data.accessToken`, bấm **Authorize**, dán token (không cần gõ chữ `Bearer`).
+3. Gọi các API khác. `POST /api/auth/logout` thu hồi token hiện tại.
+
+**Phân quyền:** ADMIN quản lý toàn bộ · OPERATOR nhập/sửa dữ liệu, đổi trạng thái đơn · VIEWER chỉ xem và thống kê.
+
+**Định dạng phản hồi chung:** `{"status": <HTTP status>, "message": "...", "data": ...}`.
+Mã lỗi: 400 đầu vào sai · 401 thiếu/sai/hết hạn/đã thu hồi token · 403 không đủ quyền ·
+404 không tìm thấy · 409 xung đột dữ liệu · 503 database không khả dụng.
+'''
+
+TAGS = [
+    {'name': 'Auth', 'description': 'Đăng nhập (cấp JWT), đăng xuất (thu hồi JWT), thông tin tài khoản hiện tại'},
+    {'name': 'Customers', 'description': 'CRUD khách hàng'},
+]
+
 app = FastAPI(title='Genie Vina – Connext GNOM Operations API', version='1.0.0', lifespan=lifespan,
-              description='REST API quản lý dữ liệu và chỉ số vận hành Connext GNOM. Bearer JWT; '
-                          'vai trò ADMIN / OPERATOR / VIEWER. Mọi phản hồi có dạng '
-                          '`{"status", "message", "data"}`.')
+              description=DESCRIPTION, openapi_tags=TAGS,
+              swagger_ui_parameters={'persistAuthorization': True})
 register_exception_handlers(app)
 app.include_router(auth_router)
 app.include_router(customers_router)

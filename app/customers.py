@@ -1,21 +1,22 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, HTTPException, Path, Query
 from psycopg import sql
 
-from app.auth import Database, require_roles
+from app.auth import Database
 from app.errors import error_responses
 from app.models import (
     Country, CustomerCreate, CustomerOut, CustomerPage, CustomerPatch,
     Envelope, SignupMethod,
 )
+from app.permissions import allow
 
 router = APIRouter(prefix='/api/customers', tags=['Customers'], responses=error_responses({
     404: 'Customer not found', 409: 'Duplicate code or related data conflict',
 }))
-READ = [Depends(require_roles('ADMIN', 'OPERATOR', 'VIEWER'))]
-WRITE = [Depends(require_roles('ADMIN', 'OPERATOR'))]
-ADMIN = [Depends(require_roles('ADMIN'))]
+READ = allow('customers:read')
+WRITE = allow('customers:write')
+ADMIN = allow('customers:delete')
 CustomerId = Annotated[int, Path(gt=0, le=9223372036854775807)]
 COLUMNS = '''id, customer_code AS "customerCode", name, country,
              signup_method AS "signupMethod", signed_up_at AS "signedUpAt"'''
