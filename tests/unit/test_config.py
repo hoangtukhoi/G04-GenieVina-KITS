@@ -8,6 +8,7 @@ def isolated_settings(monkeypatch):
     get_settings.cache_clear()
     monkeypatch.delenv('DATABASE_URL', raising=False)
     monkeypatch.delenv('JWT_SECRET', raising=False)
+    monkeypatch.delenv('JWT_EXPIRES_MINUTES', raising=False)
     yield
     get_settings.cache_clear()
 
@@ -32,3 +33,25 @@ def test_minimum_length_signing_secret_is_accepted(monkeypatch):
     settings = get_settings()
     assert settings.database_url == 'postgresql://localhost/test'
     assert settings.jwt_secret == 'X' * 32
+
+
+@pytest.fixture
+def valid_env(monkeypatch):
+    monkeypatch.setenv('DATABASE_URL', 'postgresql://localhost/test')
+    monkeypatch.setenv('JWT_SECRET', 'X' * 32)
+
+
+def test_token_lifetime_defaults_to_60_minutes(valid_env):
+    assert get_settings().access_token_minutes == 60
+
+
+def test_token_lifetime_can_be_configured(valid_env, monkeypatch):
+    monkeypatch.setenv('JWT_EXPIRES_MINUTES', '15')
+    assert get_settings().access_token_minutes == 15
+
+
+@pytest.mark.parametrize('value', ['0', '4', '1441', '-5', 'abc', '1.5'])
+def test_invalid_token_lifetime_prevents_startup(valid_env, monkeypatch, value):
+    monkeypatch.setenv('JWT_EXPIRES_MINUTES', value)
+    with pytest.raises(RuntimeError, match='JWT_EXPIRES_MINUTES'):
+        get_settings()
