@@ -10,12 +10,14 @@ from app.auth import get_principal, require_roles
 from app.config import Settings
 from app.models import Principal
 
+JTI = 'a' * 32
+
 SECRET = 'unit-test-secret-at-least-32-bytes-long'
 
 
 def credentials(claims=None, *, key=SECRET, algorithm='HS256'):
     if claims is None:
-        claims = {'sub': '2', 'exp': datetime.now(timezone.utc) + timedelta(minutes=5)}
+        claims = {'sub': '2', 'exp': datetime.now(timezone.utc) + timedelta(minutes=5), 'jti': JTI}
     return HTTPAuthorizationCredentials(scheme='Bearer', credentials=jwt.encode(claims, key, algorithm=algorithm))
 
 
@@ -23,7 +25,7 @@ def credentials(claims=None, *, key=SECRET, algorithm='HS256'):
 def connection(monkeypatch):
     monkeypatch.setattr('app.auth.get_settings', lambda: Settings('unused', SECRET))
     connection = Mock()
-    connection.execute.return_value.fetchone.return_value = {'id': 2, 'role': 'OPERATOR'}
+    connection.execute.return_value.fetchone.return_value = {'id': 2, 'role': 'OPERATOR', 'revoked': False}
     return connection
 
 
@@ -36,14 +38,15 @@ def assert_unauthorized(credential, connection):
 
 def test_valid_token_loads_current_member_and_uses_parameterized_query(connection):
     result = get_principal(credentials(), connection)
-    assert result == Principal(id=2, role='OPERATOR')
+    assert (result.id, result.role, result.token_id) == (2, 'OPERATOR', JTI)
+    assert result.token_expires_at is not None
     query, parameters = connection.execute.call_args.args
     assert '%s' in query
-    assert parameters == (2,)
+    assert parameters == (JTI, 2)
 
 
 def test_role_claim_does_not_override_database_permissions(connection):
-    token = credentials({'sub': '2', 'exp': 9999999999, 'role': 'ADMIN'})
+    token = credentials({'sub': '2', 'exp': 9999999999, 'jti': JTI, 'role': 'ADMIN'})
     assert get_principal(token, connection).role == 'OPERATOR'
 
 
@@ -54,14 +57,14 @@ def test_deleted_member_cannot_use_an_unexpired_token(connection):
 
 @pytest.mark.parametrize('subject', ['0', '-1', 'not-an-id', '1 OR 1=1', '１２', '9223372036854775808', 2, None])
 def test_invalid_member_identifiers_are_rejected_before_database_access(connection, subject):
-    assert_unauthorized(credentials({'sub': subject, 'exp': 9999999999}), connection)
+    assert_unauthorized(credentials({'sub': subject, 'exp': 9999999999, 'jti': JTI}), connection)
     connection.execute.assert_not_called()
 
 
 @pytest.mark.parametrize('claims', [
-    {'sub': '2'}, {'exp': 9999999999},
-    {'sub': '2', 'exp': 1}, {'sub': '2', 'exp': 'invalid'},
-    {'sub': '2', 'exp': 9999999999, 'nbf': 9999999998},
+    {'sub': '2', 'jti': JTI}, {'exp': 9999999999, 'jti': JTI}, {'sub': '2', 'exp': 9999999999},
+    {'sub': '2', 'exp': 1, 'jti': JTI}, {'sub': '2', 'exp': 'invalid', 'jti': JTI},
+    {'sub': '2', 'exp': 9999999999, 'nbf': 9999999998, 'jti': JTI},
 ])
 def test_missing_expired_or_not_yet_valid_claims(connection, claims):
     assert_unauthorized(credentials(claims), connection)
@@ -96,3 +99,14 @@ def test_read_write_delete_permission_matrix(allowed, role):
         with pytest.raises(HTTPException) as exc:
             check(principal)
         assert exc.value.status_code == 403
+
+
+def test_revoked_token_is_rejected(connection):
+    connection.execute.return_value.fetchone.return_value = {'id': 2, 'role': 'OPERATOR', 'revoked': True}
+    assert_unauthorized(credentials(), connection)
+
+
+@pytest.mark.parametrize('token_id', ['', 'x' * 65, 123, None, 'has space', "x' OR '1'='1"])
+def test_invalid_token_ids_are_rejected_before_database_access(connection, token_id):
+    assert_unauthorized(credentials({'sub': '2', 'exp': 9999999999, 'jti': token_id}), connection)
+    connection.execute.assert_not_called()

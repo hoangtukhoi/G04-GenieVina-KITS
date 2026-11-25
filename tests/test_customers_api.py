@@ -10,7 +10,7 @@ from tests.conftest import TEST_SECRET
 
 
 def auth(member=1, **overrides):
-    claims = {'sub': str(member), 'exp': datetime.now(timezone.utc) + timedelta(minutes=5)}
+    claims = {'sub': str(member), 'exp': datetime.now(timezone.utc) + timedelta(minutes=5), 'jti': uuid4().hex}
     claims.update(overrides)
     return {'Authorization': 'Bearer ' + jwt.encode(claims, TEST_SECRET, algorithm='HS256')}
 
@@ -155,10 +155,13 @@ def test_role_is_read_from_database_not_token(client, api_database):
 def test_swagger_and_openapi_match_runtime(client):
     assert client.get('/docs').status_code == 200
     schema = client.get('/openapi.json').json()
-    assert set(schema['paths']) == {'/api/customers', '/api/customers/{id}'}
-    for path in schema['paths'].values():
+    assert {'/api/customers', '/api/customers/{id}', '/api/auth/login', '/api/auth/logout'} <= set(schema['paths'])
+    for name, path in schema['paths'].items():
         for operation in path.values():
-            assert operation['security'] == [{'HTTPBearer': []}]
+            if name == '/api/auth/login':
+                assert 'security' not in operation
+            else:
+                assert operation['security'] == [{'HTTPBearer': []}]
             assert '400' in operation['responses']
             assert '422' not in operation['responses']
     assert_response(client.get('/unknown'), 404)

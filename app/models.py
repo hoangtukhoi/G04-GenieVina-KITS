@@ -85,6 +85,41 @@ class ErrorEnvelope(BaseModel):
     data: ValidationDetails | None = None
 
 
+class Role(str, Enum):
+    ADMIN = 'ADMIN'
+    OPERATOR = 'OPERATOR'
+    VIEWER = 'VIEWER'
+
+
 class Principal(BaseModel):
+    """The authenticated member for the current request (role is read from the database)."""
     id: int
     role: str
+    token_id: str | None = None
+    token_expires_at: AwareDatetime | None = None
+
+
+class LoginRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid', json_schema_extra={'example': {
+        'email': 'admin@example.invalid', 'password': 'DemoOnly!2026',
+    }})
+    # Plain string (not EmailStr): demo accounts use the reserved .invalid domain and the
+    # lookup is an exact, case-insensitive match anyway.
+    email: Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=254,
+                                            pattern=r'^[^@\s]+@[^@\s]+$')]
+    password: Annotated[str, StringConstraints(min_length=1, max_length=128)]
+
+
+class MemberOut(BaseModel):
+    id: int
+    email: str
+    name: str
+    role: Role
+
+
+class LoginData(BaseModel):
+    accessToken: str
+    tokenType: str = 'Bearer'
+    expiresIn: int = Field(description='Seconds until the access token expires')
+    expiresAt: AwareDatetime
+    member: MemberOut
