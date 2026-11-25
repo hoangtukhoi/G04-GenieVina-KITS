@@ -25,7 +25,7 @@ def test_matrix_covers_exactly_the_expected_permissions():
 
 
 @pytest.mark.parametrize('permission', EXPECTED)
-@pytest.mark.parametrize('index,role', enumerate(['ADMIN', 'OPERATOR', 'VIEWER']))
+@pytest.mark.parametrize('index,role', list(enumerate(['ADMIN', 'OPERATOR', 'VIEWER'])))
 def test_permission_matrix(permission, index, role):
     principal = Principal(id=1, role=role)
     check = require_permission(permission)
