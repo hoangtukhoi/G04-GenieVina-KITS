@@ -7,7 +7,9 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
 
-from app.main import database_error, http_error, unexpected_error, validation_error
+from app.errors import (
+    AppError, app_error, database_error, error_responses, http_error, ok, unexpected_error, validation_error,
+)
 
 REQUEST = Request({'type': 'http', 'method': 'GET', 'path': '/api/customers', 'headers': []})
 PRIVATE = 'private-database-password-and-query-details'
@@ -62,3 +64,56 @@ def test_unexpected_error_does_not_leak_exception_text(caplog):
     assert response_body(response, 500)['message'] == 'Internal server error'
     assert PRIVATE not in response.body.decode()
     assert PRIVATE not in caplog.text
+
+
+class FakeDiag:
+    def __init__(self, constraint_name):
+        self.constraint_name = constraint_name
+
+
+def violation(error_type, constraint):
+    exc = error_type(PRIVATE)
+    # psycopg exposes diagnostics read-only; patch the attribute on a subclass instance.
+    exc.__class__ = type(error_type.__name__, (error_type,), {'diag': FakeDiag(constraint)})
+    return exc
+
+
+@pytest.mark.parametrize('error_type,constraint,status,message', [
+    (psycopg.errors.UniqueViolation, 'customers_customer_code_key', 409, 'Customer code already exists'),
+    (psycopg.errors.ForeignKeyViolation, 'orders_customer_id_fkey', 409,
+     'Customer has related orders or AI results and cannot be deleted'),
+    (psycopg.errors.ForeignKeyViolation, 'customer_event_customer_exists', 404, 'Customer not found'),
+    (psycopg.errors.CheckViolation, 'orders_valid_transition', 409, 'Invalid order status transition'),
+    (psycopg.errors.CheckViolation, 'orders_amount_check', 400, 'Amount must be greater than 0'),
+    (psycopg.errors.UniqueViolation, 'members_email_unique', 409, 'Email already exists'),
+])
+def test_constraint_violations_map_to_module_specific_messages(error_type, constraint, status, message):
+    response = asyncio.run(database_error(REQUEST, violation(error_type, constraint)))
+    assert response_body(response, status)['message'] == message
+    assert PRIVATE not in response.body.decode()
+
+
+@pytest.mark.parametrize('error_type,message', [
+    (psycopg.errors.UniqueViolation, 'Resource already exists'),
+    (psycopg.errors.ForeignKeyViolation, 'Related data conflict'),
+    (psycopg.errors.CheckViolation, 'Data violates a business rule'),
+])
+def test_unmapped_constraints_fall_back_to_generic_conflict(error_type, message):
+    response = asyncio.run(database_error(REQUEST, violation(error_type, 'some_future_constraint')))
+    assert response_body(response, 409)['message'] == message
+
+
+def test_app_error_renders_common_envelope_with_data():
+    response = asyncio.run(app_error(REQUEST, AppError(409, 'Insufficient stock', {'ids': [1, 2]})))
+    assert response_body(response, 409) == {'status': 409, 'message': 'Insufficient stock', 'data': {'ids': [1, 2]}}
+
+
+def test_ok_helper_builds_success_envelope():
+    assert ok({'id': 1}, 201) == {'status': 201, 'message': 'success', 'data': {'id': 1}}
+    assert ok() == {'status': 200, 'message': 'success', 'data': None}
+
+
+def test_error_responses_document_common_codes():
+    responses = error_responses({404: 'Order not found'})
+    assert set(responses) == {400, 401, 403, 404, 503}
+    assert set(error_responses(public=True)) == {400, 503}
