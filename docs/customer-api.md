@@ -42,7 +42,7 @@ Danh sách có `page` (mặc định 1), `size` (mặc định 20, tối đa 100
 
 Các endpoint khách hàng phải tích hợp JWT thật. Không lấy vai trò từ header tự khai báo. Token dùng `sub` là ID của `members` dạng chuỗi và có `exp`; backend đọc vai trò hiện tại từ database để tránh dùng quyền cũ trong token. Thành viên D chịu trách nhiệm đăng nhập, phát hành/thu hồi token và thay dependency xác thực khi tích hợp cơ chế JWT chung.
 
-Triển khai hiện tại dùng HS256 với `JWT_SECRET` tối thiểu 32 byte, cố định thuật toán khi verify. Đăng nhập/logout và kiểm tra danh sách token đã thu hồi chưa thuộc phần A. `scripts/create_demo_token.py` là công cụ local để thử seed, không được gắn thành endpoint.
+Triển khai hiện tại dùng HS256 với `JWT_SECRET` tối thiểu 32 byte, cố định thuật toán khi verify. **Đã tích hợp phần D:** đăng nhập/logout, `jti` và danh sách token đã thu hồi, ma trận quyền dùng chung `app/permissions.py`, phản hồi lỗi chung `app/errors.py`. Xem [auth.md](auth.md).
 
 ## Transaction và tích hợp database
 
