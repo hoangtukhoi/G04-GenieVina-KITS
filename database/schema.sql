@@ -66,10 +66,12 @@ DECLARE signup_time TIMESTAMPTZ;
 BEGIN
     SELECT signed_up_at INTO signup_time FROM customers WHERE id = NEW.customer_id FOR SHARE;
     IF NOT FOUND THEN
-        RAISE EXCEPTION 'Customer % does not exist', NEW.customer_id USING ERRCODE = '23503';
+        RAISE EXCEPTION 'Customer % does not exist', NEW.customer_id
+            USING ERRCODE = '23503', CONSTRAINT = 'customer_event_customer_exists';
     END IF;
     IF NEW.created_at < signup_time THEN
-        RAISE EXCEPTION 'Event cannot precede customer signup' USING ERRCODE = '23514';
+        RAISE EXCEPTION 'Event cannot precede customer signup'
+            USING ERRCODE = '23514', CONSTRAINT = 'customer_event_after_signup';
     END IF;
     RETURN NEW;
 END;
@@ -85,7 +87,8 @@ BEGIN
         EXISTS (SELECT 1 FROM orders WHERE customer_id = OLD.id AND created_at < NEW.signed_up_at)
         OR EXISTS (SELECT 1 FROM ai_results WHERE customer_id = OLD.id AND created_at < NEW.signed_up_at)
     ) THEN
-        RAISE EXCEPTION 'Signup date cannot follow existing events' USING ERRCODE = '23514';
+        RAISE EXCEPTION 'Signup date cannot follow existing events'
+            USING ERRCODE = '23514', CONSTRAINT = 'customers_signup_before_events';
     END IF;
     RETURN NEW;
 END;
@@ -97,24 +100,29 @@ CREATE FUNCTION enforce_order_transition() RETURNS TRIGGER LANGUAGE plpgsql AS $
 BEGIN
     IF TG_OP = 'INSERT' THEN
         IF NEW.status <> 'PENDING' THEN
-            RAISE EXCEPTION 'New orders must start as PENDING' USING ERRCODE = '23514';
+            RAISE EXCEPTION 'New orders must start as PENDING'
+                USING ERRCODE = '23514', CONSTRAINT = 'orders_initial_status';
         END IF;
         RETURN NEW;
     END IF;
     IF NEW.customer_id IS DISTINCT FROM OLD.customer_id OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
-        RAISE EXCEPTION 'Order customer and creation time are immutable' USING ERRCODE = '23514';
+        RAISE EXCEPTION 'Order customer and creation time are immutable'
+            USING ERRCODE = '23514', CONSTRAINT = 'orders_immutable_fields';
     END IF;
     IF OLD.paid_at IS NOT NULL AND NEW.paid_at IS DISTINCT FROM OLD.paid_at THEN
-        RAISE EXCEPTION 'Existing payment time is immutable' USING ERRCODE = '23514';
+        RAISE EXCEPTION 'Existing payment time is immutable'
+            USING ERRCODE = '23514', CONSTRAINT = 'orders_payment_time_immutable';
     END IF;
     IF OLD.refunded_at IS NOT NULL AND NEW.refunded_at IS DISTINCT FROM OLD.refunded_at THEN
-        RAISE EXCEPTION 'Existing refund time is immutable' USING ERRCODE = '23514';
+        RAISE EXCEPTION 'Existing refund time is immutable'
+            USING ERRCODE = '23514', CONSTRAINT = 'orders_refund_time_immutable';
     END IF;
     IF NEW.status IS DISTINCT FROM OLD.status AND NOT (
         (OLD.status = 'PENDING' AND NEW.status IN ('PAID', 'FAILED'))
         OR (OLD.status = 'PAID' AND NEW.status = 'REFUNDED')
     ) THEN
-        RAISE EXCEPTION 'Invalid order transition: % -> %', OLD.status, NEW.status USING ERRCODE = '23514';
+        RAISE EXCEPTION 'Invalid order transition: % -> %', OLD.status, NEW.status
+            USING ERRCODE = '23514', CONSTRAINT = 'orders_valid_transition';
     END IF;
     RETURN NEW;
 END;

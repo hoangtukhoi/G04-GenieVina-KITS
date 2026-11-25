@@ -4,19 +4,15 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from psycopg import sql
 
 from app.auth import Database, require_roles
+from app.errors import error_responses
 from app.models import (
     Country, CustomerCreate, CustomerOut, CustomerPage, CustomerPatch,
-    Envelope, ErrorEnvelope, SignupMethod,
+    Envelope, SignupMethod,
 )
 
-router = APIRouter(prefix='/api/customers', tags=['Customers'], responses={
-    code: {'model': ErrorEnvelope, 'description': description}
-    for code, description in {
-        400: 'Invalid input', 401: 'Missing/invalid JWT', 403: 'Insufficient permissions',
-        404: 'Customer not found', 409: 'Duplicate code or related data conflict',
-        503: 'Database unavailable',
-    }.items()
-})
+router = APIRouter(prefix='/api/customers', tags=['Customers'], responses=error_responses({
+    404: 'Customer not found', 409: 'Duplicate code or related data conflict',
+}))
 READ = [Depends(require_roles('ADMIN', 'OPERATOR', 'VIEWER'))]
 WRITE = [Depends(require_roles('ADMIN', 'OPERATOR'))]
 ADMIN = [Depends(require_roles('ADMIN'))]
